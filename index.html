@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Predictive Maintenance — 30-Day Failure Risk</title>
+<style>
+  :root{
+    --ink:#0f172a; --muted:#64748b; --brand:#0e7490; --brand2:#155e75;
+    --ok:#16a34a; --warn:#d97706; --bad:#dc2626; --line:#e2e8f0; --bg:#f1f5f9;
+    --card:#ffffff;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg);line-height:1.5}
+  header{background:linear-gradient(135deg,var(--brand),#0f766e);color:#fff;padding:22px 28px}
+  header h1{font-size:22px;font-weight:700}
+  header p{opacity:.9;font-size:13px;margin-top:4px}
+  .wrap{max-width:1050px;margin:0 auto;padding:22px}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:22px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .kpi .l{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+  .kpi .v{font-size:24px;font-weight:700;margin-top:4px}
+  .kpi .s{font-size:12px;margin-top:2px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px}
+  .card h2{font-size:15px;margin-bottom:12px}
+  .grid{display:grid;grid-template-columns:340px 1fr;gap:18px}
+  label{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
+  input[type=range]{width:100%}
+  input[type=number]{width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px}
+  .val{font-weight:700;color:var(--ink);font-size:15px}
+  canvas{width:100%}
+  .riskbox{border-radius:12px;padding:18px;color:#fff;text-align:center;margin-top:6px}
+  .riskbox .big{font-size:40px;font-weight:800}
+  .riskbox .band{font-size:14px;margin-top:4px;font-weight:600}
+  button{background:var(--brand);color:#fff;border:0;border-radius:8px;padding:10px 16px;font-weight:600;cursor:pointer;font-size:13px}
+  button:hover{background:var(--brand2)}
+  .hint{font-size:12px;color:var(--muted);margin-top:6px}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+  .chip{background:#f1f5f9;border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:11px;cursor:pointer}
+  .chip.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+  @media(max-width:820px){.grid{grid-template-columns:1fr}}
+  .weights{font-size:13px}
+  .weights td{padding:5px 8px;border-bottom:1px solid var(--line)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Predictive Maintenance</h1>
+  <p>Failure probability next 30 days from motor temperature, vibration and running hours</p>
+</header>
+<div class="wrap">
+  <div class="kpis">
+    <div class="kpi"><div class="l">Model</div><div class="v">Logistic regression</div><div class="s">pure Python, trained on 240 readings</div></div>
+    <div class="kpi"><div class="l">Training accuracy</div><div class="v">80.0%</div><div class="s">precision 73% · recall 68%</div></div>
+    <div class="kpi"><div class="l">Headline question</div><div class="v">P(fail ≤ 30 d)</div><div class="s">temperature · vibration · runtime</div></div>
+  </div>
+  <div class="chips" id="scenarios">
+    <span class="chip on" onclick="scenario(this,'65','1.2','1500')">Healthy</span>
+    <span class="chip" onclick="scenario(this,'72','2.6','3400')">Moderate load</span>
+    <span class="chip" onclick="scenario(this,'78','4.2','5200')">Wear stage</span>
+    <span class="chip" onclick="scenario(this,'88','5.9','7600')">Impending failure</span>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <h2>Current machine state</h2>
+      <label>Motor temperature (°C)
+        <input type="range" id="sl_temp" min="55" max="95" step="1" value="78" oninput="sync()">
+        <span class="val" id="v_temp">78 °C</span>
+      </label>
+      <label>Vibration (mm/s RMS)
+        <input type="range" id="sl_vib" min="0.5" max="7" step="0.1" value="4.2" oninput="sync()">
+        <span class="val" id="v_vib">4.2 mm/s</span>
+      </label>
+      <label>Cumulative running hours
+        <input type="range" id="sl_run" min="200" max="9000" step="100" value="5200" oninput="sync()">
+        <span class="val" id="v_run">5200 h</span>
+      </label>
+      <button onclick="autoAlert()">Auto-fit a trending scenario</button>
+      <p class="hint">Slide the sensors or pick a scenario above. The probability comes from the same logistic model in <code>predictive_maintenance.py</code>.</p>
+    </div>
+    <div class="card">
+      <h2>Failure probability — next 30 days</h2>
+      <div class="riskbox" id="riskbox">
+        <div class="big" id="prob">—</div>
+        <div class="band" id="band">—</div>
+      </div>
+      <canvas id="meter" style="height:150px;margin-top:10px"></canvas>
+    </div>
+  </div>
+  <div class="card" style="margin-top:18px">
+    <h2>Interpretability — learned model coefficients</h2>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:10px">
+      Positive coefficient + higher feature = higher 30-day failure risk. Run
+      <code>python3 predictive_maintenance.py</code> to refit from raw history.
+    </p>
+    <table class="weights">
+      <tr><td>intercept</td><td><strong>-1.06</strong></td></tr>
+      <tr><td>motor_temp  <em>(per std dev)</em></td><td><strong>+0.87</strong></td></tr>
+      <tr><td>vibration   <em>(per std dev)</em></td><td><strong>+1.36</strong></td></tr>
+      <tr><td>runtime_hours <em>(per std dev)</em></td><td><strong>+1.28</strong></td></tr>
+    </table>
+  </div>
+</div>
+<script>
+const MODEL = {
+  w0: -1.0637,
+  w: [0.8667, 1.358, 1.2795],
+  means: [74.7192, 3.5109, 4400.2875],
+  stds: [12.3727, 1.7621, 2507.0779]
+};
+const $ = s => document.getElementById(s);
+function sigmoid(z){ return z>=0 ? 1/(1+Math.exp(-z)) : Math.exp(z)/(1+Math.exp(z)); }
+function band(p){ return p>=0.75?['Critical — plan maintenance now',[220,38,38]]:
+  p>=0.50?['High — inspect within this week',[217,119,6]]:
+  p>=0.25?['Moderate — monitor trend',[217,119,6]]:
+  ['Low — routine schedule',[22,163,74]]; }
+function prob(){
+  const t=+$('sl_temp').value, v=+$('sl_vib').value, r=+$('sl_run').value;
+  const z = MODEL.w0 +
+    MODEL.w[0]*(t-MODEL.means[0])/MODEL.stds[0] +
+    MODEL.w[1]*(v-MODEL.means[1])/MODEL.stds[1] +
+    MODEL.w[2]*(r-MODEL.means[2])/MODEL.stds[2];
+  return sigmoid(z);
+}
+function sync(){
+  $('v_temp').textContent=$('sl_temp').value+' °C';
+  $('v_vib').textContent=(+$('sl_vib').value).toFixed(1)+' mm/s';
+  $('v_run').textContent=$('sl_run').value+' h';
+  render();
+}
+function scenario(el,t,v,r){
+  document.querySelectorAll('.chip').forEach(c=>c.classList.remove('on'));
+  el.classList.add('on');
+  $('sl_temp').value=t; $('sl_vib').value=v; $('sl_run').value=r;
+  sync();
+}
+function render(){
+  const p=prob(), b=band(p);
+  const [br, bg, bb]=b[1];
+  $('prob').textContent=(p*100).toFixed(1)+'%';
+  $('band').textContent=b[0];
+  $('riskbox').style.background='rgb('+br+','+bg+','+bb+')';
+  drawMeter(p, 'rgb('+br+','+bg+','+bb+')');
+}
+function drawMeter(p,color){
+  const c=$('meter'), x=c.getContext('2d');
+  c.width=c.offsetWidth; if(!c.width) return;
+  const w=c.width, h=c.height;
+  x.clearRect(0,0,w,h);
+  const cx=w/2, cy=h-10, R=Math.min(w/2,180)-8;
+  x.lineWidth=18; x.lineCap='round';
+  x.strokeStyle='#e2e8f0';
+  x.beginPath(); x.arc(cx,cy,R,Math.PI,2*Math.PI); x.stroke();
+  const a=Math.PI+p*Math.PI;
+  x.strokeStyle=color;
+  x.beginPath(); x.arc(cx,cy,R,Math.PI,a); x.stroke();
+  // tick labels
+  x.fillStyle='#64748b'; x.font='11px system-ui'; x.textAlign='center';
+  x.fillText('0%', cx-R-14, cy+14);
+  x.fillText('50%', cx, cy+R+16);
+  x.fillText('100%', cx+R+14, cy+14);
+}
+function autoAlert(){
+  const t=+$('sl_temp').value;
+  $('sl_temp').value=Math.min(95, t+6);
+  $('sl_vib').value=Math.min(7, +$('sl_vib').value+0.9);
+  $('sl_run').value=Math.min(9000, +$('sl_run').value+600);
+  sync();
+}
+sync();
+</script>
+</body>
+</html>
